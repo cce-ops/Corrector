@@ -26,13 +26,15 @@ def extraer_texto_pdf(pdf_file):
     return texto
 
 # --- INTERFAZ DE USUARIO ---
-st.title("🤖 Evaluador de Informes (Proyectos de Ingeniería)")
+st.title("🤖 Evaluador de Informes (Proyectos de Ingeniería)", 
+         help="**¿Por qué usar esto y no ChatGPT directamente?**\n\nEsta herramienta utiliza RAG (Generación Aumentada por Recuperación) y Salidas Estructuradas JSON.\n\nAl contrario que subir un PDF a Gemini o Claude donde la IA opina libremente, este sistema obliga al modelo a leer PRIMERO tus apuntes y rúbricas (Base de Conocimiento) y a devolver el feedback siempre en el mismo formato estricto (Puntos fuertes y Correcciones detalladas), garantizando una consistencia que no se logra en un chat abierto.")
 
 tab1, tab2 = st.tabs(["📚 1. Subir Base de Conocimiento", "📝 2. Evaluar Informe del Alumno"])
 
 # --- PESTAÑA 1: BASE DE CONOCIMIENTO ---
 with tab1:
-    st.header("Alimentar el sistema")
+    st.header("Alimentar el sistema", 
+              help="**¿Dónde se guardan estos PDF?**\n\nLos archivos que subas aquí SÍ se procesan y se guardan en una base de datos vectorial interna en el servidor (ChromaDB) mientras la aplicación esté activa. Permanecerán ahí como memoria colectiva para evaluar los proyectos nuevos, hasta que el servidor se reinicie tras días de inactividad.")
     st.info("Sube apuntes, rúbricas o proyectos excelentes de años anteriores. El modelo los usará como referencia para evaluar.")
     
     referencias = st.file_uploader("Sube PDFs de referencia", type="pdf", accept_multiple_files=True)
@@ -58,10 +60,14 @@ with tab1:
 
 # --- PESTAÑA 2: EVALUACIÓN ---
 with tab2:
-    st.header("Evaluar un nuevo trabajo")
+    st.header("Evaluar un nuevo trabajo", 
+              help="**Privacidad del alumno:**\n\nA diferencia de la pestaña anterior, los informes que subas aquí NO SE GUARDAN. Se procesan temporalmente en la memoria RAM del servidor para extraer el texto, se evalúan, y desaparecen en cuanto cierras la aplicación.")
     informe_alumno = st.file_uploader("Sube el informe del alumno (PDF)", type="pdf", key="alumno")
     
-    if st.button("Analizar y Evaluar"):
+    # El botón ahora tiene el tooltip sobre los errores de Rate Limit
+    if st.button("Analizar y Evaluar", 
+                 help="**Si te da error 'Rate limit exceeded' o '429 Too Many Requests':**\n\nEstás usando una API gratuita que tiene un límite de evaluaciones por minuto/día.\nNo te preocupes, el límite es temporal. Si evalúas muchos proyectos seguidos, espera unos minutos o inténtalo al día siguiente y el servicio se restablecerá automáticamente."):
+        
         if not informe_alumno:
             st.warning("Sube el informe del alumno para comenzar.")
             st.stop()
@@ -90,7 +96,6 @@ with tab2:
                 api_key=st.secrets["GROQ_API_KEY"]
             )
             
-            # --- NUEVO PROMPT EXHAUSTIVO ---
             prompt = f"""
             Eres un profesor evaluando un informe técnico de proyectos de ingeniería. 
             Tu objetivo principal es dar feedback exhaustivo, constructivo y detallado para que el alumno mejore.
@@ -99,55 +104,50 @@ with tab2:
             {contexto_recuperado}
             
             INFORME DEL ALUMNO A EVALUAR:
-            {texto_alumno[:15000]} 
+            {texto_alumno[:50000]} 
             
             INSTRUCCIONES CRÍTICAS:
             1. Analiza exhaustivamente el documento.
-            2. Identifica los errores, fallos de cálculo, faltas de formato o ausencias de contenido.
+            2. Identifica TODOS los errores, fallos de cálculo, faltas de formato o ausencias de contenido.
             3. Por cada error, DEBES explicar qué está mal y cómo sugerirías corregirlo detalladamente.
             4. Devuelve el resultado ÚNICAMENTE en formato JSON CRUDO. NO incluyas bloques de código Markdown (```json). Empieza directamente con {{ y termina con }}.
             
             ESTRUCTURA JSON EXACTA:
             {{
-              "nota_global": (número decimal),
-              "resumen_analisis": "Un párrafo resumiendo el nivel general.",
+              "nota_global": (número decimal sobre 10),
+              "resumen_analisis": "Un párrafo de 4 o 5 líneas resumiendo el nivel general del trabajo, el esfuerzo demostrado y las deficiencias clave.",
               "puntos_fuertes": [
-                "Punto fuerte 1"
+                "Punto fuerte 1",
+                "Punto fuerte 2"
               ],
               "puntos_a_corregir": [
                 {{
-                  "que_esta_mal": "Descripción detallada del error",
-                  "como_corregir": "Sugerencia concreta sobre cómo solucionarlo"
+                  "que_esta_mal": "Descripción detallada del error o aspecto deficiente",
+                  "como_corregir": "Sugerencia concreta, técnica y constructiva sobre cómo solucionarlo"
                 }}
               ]
             }}
             """
             
             try:
-                # Añadimos max_tokens para que no se quede a medias escribiendo el feedback
                 respuesta = cliente_llm.chat.completions.create(
                     model="openai/gpt-oss-120b",
                     messages=[
                         {"role": "system", "content": "Eres un servidor que SOLO devuelve código JSON válido. Nada de texto introductorio."},
                         {"role": "user", "content": prompt}
                     ],
-                    temperature=0.2,
-                    max_tokens=4000, # <-- ESTO ES CLAVE PARA QUE NO SE CORTE
+                    temperature=0.1,
+                    max_tokens=4000,
                     response_format={"type": "json_object"}
                 )
                 
                 dic_resultado = json.loads(respuesta.choices[0].message.content)
                 
-                # --- NUEVA VISUALIZACIÓN EN STREAMLIT ---
                 st.success("✅ Evaluación completada")
-                
-                # 1. Cabecera con Nota y Resumen
                 st.markdown(f"### 🎯 Nota Global: **{dic_resultado.get('nota_global', 0)} / 10**")
                 st.info(f"**Resumen del Análisis:**\n\n{dic_resultado.get('resumen_analisis', 'Sin resumen.')}")
                 
                 st.divider()
-                
-                # 2. Columnas para Puntos Fuertes y Áreas de Mejora
                 col1, col2 = st.columns(2)
                 
                 with col1:
@@ -164,10 +164,9 @@ with tab2:
                     puntos_a_corregir = dic_resultado.get('puntos_a_corregir', [])
                     if puntos_a_corregir:
                         for item in puntos_a_corregir:
-                            # Mostramos el error en negrita y la solución debajo con un icono
                             st.markdown(f"**❌ Qué está mal:** {item.get('que_esta_mal', '')}")
                             st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;**💡 Cómo corregir:** _{item.get('como_corregir', '')}_")
-                            st.write("") # Espaciador
+                            st.write("") 
                     else:
                         st.write("No se han encontrado errores significativos. ¡Excelente trabajo!")
                         
