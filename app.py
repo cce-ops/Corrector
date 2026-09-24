@@ -166,27 +166,39 @@ with tab2:
             respuesta_json = None
             error_msg = ""
             
-            # --- SISTEMA DE RESPALDO (FALLBACK) ---
+            # --- SISTEMA DE RESPALDO (FALLBACK) Y REINTENTOS ---
             for modelo in modelos_a_probar:
-                try:
-                    st.toast(f"Intentando evaluar con el modelo: {modelo}...", icon="🔄")
-                    respuesta = cliente_llm.chat.completions.create(
-                        model=modelo, 
-                        messages=[
-                            {"role": "system", "content": "Eres un servidor que SOLO devuelve código JSON válido."},
-                            {"role": "user", "content": prompt}
-                        ],
-                        temperature=0.1,
-                        response_format={"type": "json_object"}
-                    )
-                    respuesta_json = json.loads(respuesta.choices[0].message.content)
-                    st.toast(f"¡Éxito con {modelo}!", icon="✅")
-                    break # Si funciona, salimos del bucle
-                    
-                except Exception as e:
-                    error_msg = str(e)
-                    st.toast(f"Fallo en {modelo}, intentando con el modelo de respaldo...", icon="⚠️")
-                    time.sleep(1) # Pequeña pausa antes de reintentar
+                exito = False
+                intentos_por_modelo = 2 # Intentará 2 veces con cada modelo
+                
+                for intento in range(intentos_por_modelo):
+                    try:
+                        st.toast(f"Intentando con {modelo} (Intento {intento+1}/2)...", icon="🔄")
+                        respuesta = cliente_llm.chat.completions.create(
+                            model=modelo, 
+                            messages=[
+                                {"role": "system", "content": "Eres un servidor que SOLO devuelve código JSON válido."},
+                                {"role": "user", "content": prompt}
+                            ],
+                            temperature=0.1,
+                            response_format={"type": "json_object"}
+                        )
+                        respuesta_json = json.loads(respuesta.choices[0].message.content)
+                        st.toast(f"¡Éxito con {modelo}!", icon="✅")
+                        exito = True
+                        break # Salimos del bucle de intentos porque ha funcionado
+                        
+                    except Exception as e:
+                        error_msg = str(e)
+                        # Si es un error de sobrecarga (503), esperamos 5 segundos
+                        if "503" in error_msg:
+                            st.toast(f"Servidor de Google ocupado. Esperando 5 segundos...", icon="⏳")
+                            time.sleep(5) 
+                        else:
+                            break # Si es otro error (ej. clave mal puesta), no reintenta, salta al siguiente modelo
+                            
+                if exito:
+                    break # Salimos del bucle de modelos porque ya tenemos respuesta
             
             # --- MOSTRAR RESULTADOS ---
             if respuesta_json:
