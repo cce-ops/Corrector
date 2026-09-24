@@ -99,41 +99,40 @@ with tab2:
             {contexto_recuperado}
             
             INFORME DEL ALUMNO A EVALUAR:
-            {texto_alumno[:20000]}
+            {texto_alumno[:15000]} 
             
             INSTRUCCIONES CRÍTICAS:
-            1. Analiza exhaustivamente TODO el documento.
-            2. Identifica TODOS los errores, fallos de cálculo, faltas de formato o ausencias de contenido. No te limites a unos pocos; enumera TODOS los que encuentres.
+            1. Analiza exhaustivamente el documento.
+            2. Identifica los errores, fallos de cálculo, faltas de formato o ausencias de contenido.
             3. Por cada error, DEBES explicar qué está mal y cómo sugerirías corregirlo detalladamente.
-            4. Devuelve el resultado ÚNICAMENTE en formato JSON.
+            4. Devuelve el resultado ÚNICAMENTE en formato JSON CRUDO. NO incluyas bloques de código Markdown (```json). Empieza directamente con {{ y termina con }}.
             
             ESTRUCTURA JSON EXACTA:
             {{
-              "nota_global": (número decimal sobre 10),
-              "resumen_analisis": "Un párrafo de 4 o 5 líneas resumiendo el nivel general del trabajo, el esfuerzo demostrado y las deficiencias clave.",
+              "nota_global": (número decimal),
+              "resumen_analisis": "Un párrafo resumiendo el nivel general.",
               "puntos_fuertes": [
-                "Punto fuerte 1",
-                "Punto fuerte 2", ... (todos los que consideres)
+                "Punto fuerte 1"
               ],
               "puntos_a_corregir": [
                 {{
-                  "que_esta_mal": "Descripción detallada del error o aspecto deficiente",
-                  "como_corregir": "Sugerencia concreta, técnica y constructiva sobre cómo el alumno debe solucionarlo"
-                }},
-                ... (incluye un bloque como este por CADA error encontrado, sin límite)
+                  "que_esta_mal": "Descripción detallada del error",
+                  "como_corregir": "Sugerencia concreta sobre cómo solucionarlo"
+                }}
               ]
             }}
             """
             
             try:
-                # Usamos el modelo GPT OSS 120B como determinamos antes
+                # Añadimos max_tokens para que no se quede a medias escribiendo el feedback
                 respuesta = cliente_llm.chat.completions.create(
                     model="openai/gpt-oss-120b",
                     messages=[
-                        {"role": "system", "content": "Eres un asistente de evaluación estricto. Respondes estrictamente en JSON válido."},
+                        {"role": "system", "content": "Eres un servidor que SOLO devuelve código JSON válido. Nada de texto introductorio."},
                         {"role": "user", "content": prompt}
                     ],
-                    temperature=0.1,
+                    temperature=0.2,
+                    max_tokens=4000, # <-- ESTO ES CLAVE PARA QUE NO SE CORTE
                     response_format={"type": "json_object"}
                 )
                 
