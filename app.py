@@ -208,7 +208,7 @@ with tab2:
                             respuesta = cliente_claude.messages.create(
                                 model=modelo,
                                 max_tokens=4000,
-                                temperature=0.1,
+                                temperature=0.2,
                                 messages=[
                                     {"role": "user", "content": prompt + "\n\nResponde SOLO con el objeto JSON, empezando por {"}
                                 ]
@@ -236,7 +236,7 @@ with tab2:
                                     {"role": "system", "content": "Eres un servidor que SOLO devuelve código JSON válido."},
                                     {"role": "user", "content": prompt}
                                 ],
-                                temperature=0.1,
+                                temperature=0.2,
                                 response_format={"type": "json_object"} if proveedor != "Ollama (Local)" else None, 
                                 **extra_args
                             )
