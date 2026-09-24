@@ -2,6 +2,7 @@ import streamlit as st
 import chromadb
 from pypdf import PdfReader
 from openai import OpenAI
+from anthropic import Anthropic
 import json
 import time
 
@@ -29,32 +30,55 @@ def extraer_texto_pdf(pdf_file):
 # --- BARRA LATERAL: CONFIGURACIÓN DEL PROFESOR ---
 with st.sidebar:
     st.header("⚙️ Configuración")
-    st.info("Elige el motor de IA. Si estás en la web usa Gemini/Groq. Si ejecutas esto en tu PC, usa Ollama para máxima privacidad.")
+    st.info("Elige el motor de IA. En la nube usarás tu API Key. En local (Ollama) el proceso es privado y gratuito.")
     
     proveedor = st.selectbox(
         "Proveedor de Inteligencia Artificial",
-        ["Google Gemini (Nube)", "Groq (Nube)", "Ollama (Local)"]
+        ["Google Gemini", "OpenAI (ChatGPT)", "Anthropic (Claude)", "Groq", "Ollama (Local)"]
     )
     
+    api_key_usuario = ""
+    modelo_local = ""
+    
     if proveedor == "Ollama (Local)":
-        modelo_local = st.text_input("Nombre del modelo en Ollama:", value="qwen2.5")
-        st.caption("Asegúrate de tener la app Ollama encendida en tu ordenador y el modelo descargado.")
-        api_key_usuario = "ollama_no_necesita_clave" # Valor dummy
-    else:
-        api_key_usuario = st.text_input(f"API Key de {proveedor}:", type="password")
-        st.caption("🔑 [Conseguir clave de Gemini](https://aistudio.google.com/app/apikey) | [Clave de Groq](https://console.groq.com/keys)")
+        opcion_modelo = st.selectbox(
+            "Selecciona el modelo descargado:",
+            ["qwen2.5", "llama3.1", "mistral-nemo", "Otro (Escribir manualmente)"]
+        )
+        if opcion_modelo == "Otro (Escribir manualmente)":
+            modelo_local = st.text_input("Escribe el nombre exacto del modelo:", value="llama3.2")
+        else:
+            modelo_local = opcion_modelo
+            
+        st.caption("Asegúrate de tener la app Ollama abierta en tu PC.")
+    
+    elif proveedor == "OpenAI (ChatGPT)":
+        api_key_usuario = st.text_input("API Key de OpenAI:", type="password")
+        modelo_nube = st.selectbox("Modelo:", ["gpt-4o", "gpt-4o-mini"])
+    
+    elif proveedor == "Anthropic (Claude)":
+        api_key_usuario = st.text_input("API Key de Anthropic:", type="password")
+        modelo_nube = st.selectbox("Modelo:", ["claude-3-5-sonnet-20240620", "claude-3-haiku-20240307"])
+        
+    elif proveedor == "Google Gemini":
+        api_key_usuario = st.text_input("API Key de Gemini:", type="password")
+        modelo_nube = st.selectbox("Modelo:", ["gemini-1.5-flash", "gemini-1.5-pro"])
+        st.caption("🔑 [Conseguir clave de Gemini Gratis](https://aistudio.google.com/app/apikey)")
+        
+    elif proveedor == "Groq":
+        api_key_usuario = st.text_input("API Key de Groq:", type="password")
+        modelo_nube = "openai/gpt-oss-120b"
+        st.caption("🔑 [Clave de Groq Gratis (Límite 5 págs)](https://console.groq.com/keys)")
 
 # --- INTERFAZ PRINCIPAL ---
-st.title("🤖 Evaluador de Informes (Proyectos de Ingeniería)", 
-         help="**¿Por qué usar esto y no ChatGPT directamente?**\n\nEsta herramienta utiliza RAG y Salidas JSON.\n\nAl contrario que subir un PDF a Gemini donde la IA opina libremente, este sistema obliga al modelo a leer PRIMERO tus apuntes (Base de Conocimiento) y a devolver el feedback siempre en formato estricto, garantizando consistencia.")
+st.title("🤖 Evaluador de Informes (Proyectos de Ingeniería)")
 
 tab1, tab2 = st.tabs(["📚 1. Subir Base de Conocimiento", "📝 2. Evaluar Informe del Alumno"])
 
 # --- PESTAÑA 1: BASE DE CONOCIMIENTO ---
 with tab1:
-    st.header("Alimentar el sistema", 
-              help="**¿Dónde se guardan estos PDF?**\n\nSe procesan y se guardan en una base de datos vectorial interna (ChromaDB). En la nube se borran si el servidor se duerme por inactividad. En local se guardan para siempre en tu disco duro.")
-    st.info("Sube apuntes, rúbricas o proyectos excelentes de años anteriores.")
+    st.header("Alimentar el sistema")
+    st.info("Sube apuntes o rúbricas. Se usarán como memoria (RAG) para corregir.")
     
     referencias = st.file_uploader("Sube PDFs de referencia", type="pdf", accept_multiple_files=True)
     
@@ -78,15 +102,13 @@ with tab1:
 
 # --- PESTAÑA 2: EVALUACIÓN ---
 with tab2:
-    st.header("Evaluar un nuevo trabajo", 
-              help="**Privacidad del alumno:**\n\nLos informes subidos aquí NO SE GUARDAN. Se analizan en memoria temporal y desaparecen al instante.")
+    st.header("Evaluar un nuevo trabajo")
     informe_alumno = st.file_uploader("Sube el informe del alumno (PDF)", type="pdf", key="alumno")
     
-    if st.button("Analizar y Evaluar", 
-                 help="Si usas la nube y te da error '503' o 'Rate limit', el servidor esperará 5 segundos y reintentará automáticamente."):
+    if st.button("Analizar y Evaluar"):
         
         if proveedor != "Ollama (Local)" and not api_key_usuario:
-            st.error(f"⚠️ Falta la API Key. Por favor, introduce tu clave de {proveedor} en la barra lateral.")
+            st.error(f"⚠️ Falta la API Key. Por favor, introdúcela en la barra lateral.")
             st.stop()
             
         if not informe_alumno:
@@ -95,10 +117,10 @@ with tab2:
             
         with st.spinner("Extrayendo texto del informe..."):
             texto_alumno = extraer_texto_pdf(informe_alumno)
-            
             if proveedor == "Groq":
                 texto_alumno = texto_alumno[:15000]
-                st.toast("Aviso: Con Groq se limita la lectura a ~5 páginas para evitar saturar la API gratuita.", icon="⚠️")
+            elif proveedor == "Anthropic (Claude)":
+                texto_alumno = texto_alumno[:50000] # Claude no RAG soporta muchísimo, pero limitamos por tokens de salida
             
         with st.spinner("Buscando referencias en la base de conocimiento..."):
             if collection.count() == 0:
@@ -110,29 +132,13 @@ with tab2:
                 else:
                     contexto_recuperado = "No se encontró contexto relevante."
                     
-        with st.spinner("La IA está evaluando el informe exhaustivamente..."):
-            
-            # --- CONFIGURACIÓN DEL MOTOR SEGÚN ELECCIÓN ---
-            extra_args = {}
-            if proveedor == "Google Gemini (Nube)":
-                base_url = "https://generativelanguage.googleapis.com/v1beta/openai/"
-                modelos_a_probar = ["gemini-1.5-flash"]
-            elif proveedor == "Groq (Nube)":
-                base_url = "https://api.groq.com/openai/v1"
-                modelos_a_probar = ["openai/gpt-oss-120b"]
-            elif proveedor == "Ollama (Local)":
-                base_url = "http://localhost:11434/v1"
-                modelos_a_probar = [modelo_local]
-                # Forzar 32K de contexto para leer informes enteros en local
-                extra_args = {"extra_body": {"options": {"num_ctx": 32000}}}
-
-            cliente_llm = OpenAI(base_url=base_url, api_key=api_key_usuario)
+        with st.spinner(f"La IA ({proveedor}) está evaluando el informe exhaustivamente..."):
             
             prompt = f"""
-            Eres un profesor evaluando un informe técnico de proyectos de ingeniería. 
-            Tu objetivo principal es dar feedback exhaustivo, constructivo y detallado para que el alumno mejore.
+            Eres un profesor evaluando un informe técnico de ingeniería. 
+            Da feedback exhaustivo, constructivo y detallado para que el alumno mejore.
             
-            CONTEXTO DE REFERENCIA (Apuntes y proyectos anteriores):
+            CONTEXTO DE REFERENCIA (Apuntes y rúbricas):
             {contexto_recuperado}
             
             INFORME DEL ALUMNO A EVALUAR:
@@ -140,9 +146,9 @@ with tab2:
             
             INSTRUCCIONES CRÍTICAS:
             1. Analiza exhaustivamente TODO el documento.
-            2. Identifica TODOS los errores, fallos de cálculo, faltas de formato o ausencias de contenido.
-            3. Por cada error, DEBES explicar qué está mal y cómo sugerirías corregirlo detalladamente.
-            4. Devuelve el resultado ÚNICAMENTE en formato JSON CRUDO. NO incluyas bloques de código Markdown.
+            2. Identifica TODOS los errores técnicos, faltas de formato o ausencias de contenido.
+            3. Por cada error, explica qué está mal y cómo corregirlo detalladamente.
+            4. Devuelve ÚNICAMENTE formato JSON CRUDO. NO uses markdown (```json).
             
             ESTRUCTURA JSON EXACTA:
             {{
@@ -161,44 +167,76 @@ with tab2:
             respuesta_json = None
             error_msg = ""
             
-            # --- BUCLE DE EVALUACIÓN Y REINTENTOS (CUBRE ERROR 503) ---
-            for modelo in modelos_a_probar:
-                exito = False
-                intentos = 2
-                
-                for intento in range(intentos):
-                    try:
-                        st.toast(f"Intentando con {modelo} (Intento {intento+1}/{intentos})...", icon="🔄")
-                        respuesta = cliente_llm.chat.completions.create(
-                            model=modelo, 
-                            messages=[
-                                {"role": "system", "content": "Eres un servidor que SOLO devuelve código JSON válido."},
-                                {"role": "user", "content": prompt}
-                            ],
-                            temperature=0.1,
-                            response_format={"type": "json_object"},
-                            **extra_args # Aplica memoria extra si es Ollama
-                        )
-                        respuesta_json = json.loads(respuesta.choices[0].message.content)
-                        st.toast(f"¡Éxito con {modelo}!", icon="✅")
-                        exito = True
-                        break
-                        
-                    except Exception as e:
-                        error_msg = str(e)
-                        if "503" in error_msg or "429" in error_msg:
-                            st.toast("Servidor ocupado. Reintentando en 5 segundos...", icon="⏳")
-                            time.sleep(5) 
-                        else:
-                            break # Error crítico (ej. Ollama apagado o clave falsa)
+            try:
+                if proveedor == "Anthropic (Claude)":
+                    cliente_claude = Anthropic(api_key=api_key_usuario)
+                    respuesta = cliente_claude.messages.create(
+                        model=modelo_nube,
+                        max_tokens=4000,
+                        temperature=0.1,
+                        messages=[
+                            {"role": "user", "content": prompt + "\n\nResponde SOLO con el objeto JSON solicitado, empezando por {"}
+                        ]
+                    )
+                    respuesta_json = json.loads(respuesta.content[0].text)
+                    
+                else:
+                    extra_args = {}
+                    if proveedor == "Google Gemini":
+                        base_url = "[https://generativelanguage.googleapis.com/v1beta/openai/](https://generativelanguage.googleapis.com/v1beta/openai/)"
+                        modelo_usar = modelo_nube
+                    elif proveedor == "OpenAI (ChatGPT)":
+                        base_url = "[https://api.openai.com/v1](https://api.openai.com/v1)"
+                        modelo_usar = modelo_nube
+                    elif proveedor == "Groq":
+                        base_url = "[https://api.groq.com/openai/v1](https://api.groq.com/openai/v1)"
+                        modelo_usar = modelo_nube
+                    elif proveedor == "Ollama (Local)":
+                        base_url = "http://localhost:11434/v1"
+                        modelo_usar = modelo_local
+                        api_key_usuario = "ollama"
+                        extra_args = {"extra_body": {"options": {"num_ctx": 32000}}}
+
+                    cliente_llm = OpenAI(base_url=base_url, api_key=api_key_usuario)
+                    
+                    # Intentos de llamada para la API de OpenAI-compatible
+                    intentos = 2
+                    for intento in range(intentos):
+                        try:
+                            respuesta = cliente_llm.chat.completions.create(
+                                model=modelo_usar, 
+                                messages=[
+                                    {"role": "system", "content": "Eres un servidor que SOLO devuelve código JSON válido."},
+                                    {"role": "user", "content": prompt}
+                                ],
+                                temperature=0.1,
+                                response_format={"type": "json_object"} if proveedor != "Ollama (Local)" else None, 
+                                **extra_args
+                            )
+                            texto_respuesta = respuesta.choices[0].message.content
                             
-                if exito:
-                    break
+                            # Limpieza por si Ollama devuelve markdown de todas formas
+                            if texto_respuesta.startswith("```json"):
+                                texto_respuesta = texto_respuesta[7:-3]
+                            
+                            respuesta_json = json.loads(texto_respuesta.strip())
+                            break # Exito
+                            
+                        except Exception as e:
+                            error_msg = str(e)
+                            if "503" in error_msg or "429" in error_msg:
+                                st.toast("Servidor ocupado. Reintentando en 5 segundos...", icon="⏳")
+                                time.sleep(5) 
+                            else:
+                                raise e # Falla y salta al except principal
+
+            except Exception as e:
+                st.error(f"Fallo en la evaluación: {e}")
             
             # --- MOSTRAR RESULTADOS ---
             if respuesta_json:
                 dic_resultado = respuesta_json
-                st.success("✅ Evaluación completada")
+                st.success(f"✅ Evaluación completada ({proveedor})")
                 st.markdown(f"### 🎯 Nota Global: **{dic_resultado.get('nota_global', 0)} / 10**")
                 st.info(f"**Resumen del Análisis:**\n\n{dic_resultado.get('resumen_analisis', 'Sin resumen.')}")
                 
@@ -215,6 +253,4 @@ with tab2:
                     for item in dic_resultado.get('puntos_a_corregir', []):
                         st.markdown(f"**❌ Qué está mal:** {item.get('que_esta_mal', '')}")
                         st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;**💡 Cómo corregir:** _{item.get('como_corregir', '')}_")
-                        st.write("") 
-            else:
-                st.error(f"Fallo en la evaluación. Último error: {error_msg}")
+                        st.write("")
