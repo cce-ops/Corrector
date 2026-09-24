@@ -45,12 +45,11 @@ Espera a que se instalen todas las barras de carga y cierra la ventana.
 
 Una vez completada la Fase 1, cada vez que quieras corregir entregas, el proceso es muy rápido:
 
-Opción A: El método de un clic (Recomendado)
-Si dentro de la carpeta del proyecto hay un archivo llamado Arrancar_Evaluador.bat, solo tienes que hacer doble clic en él. Se abrirá una ventana negra (no la cierres) y automáticamente se abrirá tu navegador con la herramienta lista.
+## Opción A: El método de un clic (Recomendado)
+Si dentro de la carpeta del proyecto hay un archivo llamado ".bat", solo tienes que hacer doble clic en él. Se abrirá una ventana negra (no la cierres) y automáticamente se abrirá tu navegador con la herramienta lista.
 
-
-Opción B: El método manual
-Si no usas el archivo .bat:
+## Opción B: El método manual
+Si no usas el archivo ".bat":
 
 Asegúrate de que Ollama está abierto (debe salir el icono de una llama abajo a la derecha de tu pantalla, junto a la hora de Windows).
 
