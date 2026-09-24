@@ -62,7 +62,9 @@ with st.sidebar:
         
     elif proveedor == "Google Gemini":
         api_key_usuario = st.text_input("API Key de Gemini:", type="password")
-        modelo_nube = st.selectbox("Modelo:", ["gemini-1.5-flash", "gemini-1.5-pro"])
+        # Actualizado con la lista de modelos óptimos de 2026
+        modelo_nube = st.selectbox("Modelo Principal:", ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash"])
+        st.caption("Si el principal se satura (503), el sistema usará los otros como respaldo automáticamente.")
         st.caption("🔑 [Conseguir clave de Gemini Gratis](https://aistudio.google.com/app/apikey)")
         
     elif proveedor == "Groq":
@@ -120,7 +122,7 @@ with tab2:
             if proveedor == "Groq":
                 texto_alumno = texto_alumno[:15000]
             elif proveedor == "Anthropic (Claude)":
-                texto_alumno = texto_alumno[:50000] # Claude no RAG soporta muchísimo, pero limitamos por tokens de salida
+                texto_alumno = texto_alumno[:50000]
             
         with st.spinner("Buscando referencias en la base de conocimiento..."):
             if collection.count() == 0:
@@ -148,7 +150,7 @@ with tab2:
             1. Analiza exhaustivamente TODO el documento.
             2. Identifica TODOS los errores técnicos, faltas de formato o ausencias de contenido.
             3. Por cada error, explica qué está mal y cómo corregirlo detalladamente.
-            4. Devuelve ÚNICAMENTE formato JSON CRUDO. NO uses markdown (```json).
+            4. Devuelve ÚNICAMENTE formato JSON CRUDO. NO uses markdown.
             
             ESTRUCTURA JSON EXACTA:
             {{
@@ -166,45 +168,61 @@ with tab2:
             
             respuesta_json = None
             error_msg = ""
+            exito = False
             
-            try:
-                if proveedor == "Anthropic (Claude)":
-                    cliente_claude = Anthropic(api_key=api_key_usuario)
-                    respuesta = cliente_claude.messages.create(
-                        model=modelo_nube,
-                        max_tokens=4000,
-                        temperature=0.1,
-                        messages=[
-                            {"role": "user", "content": prompt + "\n\nResponde SOLO con el objeto JSON solicitado, empezando por {"}
-                        ]
-                    )
-                    respuesta_json = json.loads(respuesta.content[0].text)
-                    
+            # --- PREPARAR LA LISTA DE MODELOS A PROBAR ---
+            # Si es Gemini, creamos la lista de respaldo. Si es otro, solo prueba el elegido.
+            if proveedor == "Google Gemini":
+                if modelo_nube == "gemini-3.8-flash":
+                    modelos_a_probar = ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash"]
+                elif modelo_nube == "gemini-3.7-flash":
+                    modelos_a_probar = ["gemini-3.7-flash", "gemini-3.6-flash"]
                 else:
-                    extra_args = {}
-                    if proveedor == "Google Gemini":
-                        base_url = "[https://generativelanguage.googleapis.com/v1beta/openai/](https://generativelanguage.googleapis.com/v1beta/openai/)"
-                        modelo_usar = modelo_nube
-                    elif proveedor == "OpenAI (ChatGPT)":
-                        base_url = "[https://api.openai.com/v1](https://api.openai.com/v1)"
-                        modelo_usar = modelo_nube
-                    elif proveedor == "Groq":
-                        base_url = "[https://api.groq.com/openai/v1](https://api.groq.com/openai/v1)"
-                        modelo_usar = modelo_nube
-                    elif proveedor == "Ollama (Local)":
-                        base_url = "http://localhost:11434/v1"
-                        modelo_usar = modelo_local
-                        api_key_usuario = "ollama"
-                        extra_args = {"extra_body": {"options": {"num_ctx": 32000}}}
+                    modelos_a_probar = ["gemini-3.6-flash"]
+            elif proveedor == "Ollama (Local)":
+                modelos_a_probar = [modelo_local]
+            else:
+                modelos_a_probar = [modelo_nube]
+            
+            # --- BUCLE MAESTRO DE EVALUACIÓN (CON RESPALDO Y REINTENTOS) ---
+            for modelo in modelos_a_probar:
+                if exito: 
+                    break # Si ya lo hemos logrado con un modelo anterior, salimos del bucle general
+                
+                intentos_por_modelo = 2
+                for intento in range(intentos_por_modelo):
+                    try:
+                        st.toast(f"Evaluando con {modelo} (Intento {intento+1}/{intentos_por_modelo})...", icon="🔄")
+                        
+                        if proveedor == "Anthropic (Claude)":
+                            cliente_claude = Anthropic(api_key=api_key_usuario)
+                            respuesta = cliente_claude.messages.create(
+                                model=modelo,
+                                max_tokens=4000,
+                                temperature=0.1,
+                                messages=[
+                                    {"role": "user", "content": prompt + "\n\nResponde SOLO con el objeto JSON, empezando por {"}
+                                ]
+                            )
+                            respuesta_json = json.loads(respuesta.content[0].text)
+                            
+                        else:
+                            extra_args = {}
+                            if proveedor == "Google Gemini":
+                                base_url = "https://generativelanguage.googleapis.com/v1beta/openai/"
+                            elif proveedor == "OpenAI (ChatGPT)":
+                                base_url = "https://api.openai.com/v1"
+                            elif proveedor == "Groq":
+                                base_url = "https://api.groq.com/openai/v1"
+                            elif proveedor == "Ollama (Local)":
+                                base_url = "http://localhost:11434/v1"
+                                api_key_usuario = "ollama"
+                                extra_args = {"extra_body": {"options": {"num_ctx": 32000}}}
 
-                    cliente_llm = OpenAI(base_url=base_url, api_key=api_key_usuario)
-                    
-                    # Intentos de llamada para la API de OpenAI-compatible
-                    intentos = 2
-                    for intento in range(intentos):
-                        try:
+                            cliente_llm = OpenAI(base_url=base_url, api_key=api_key_usuario)
+                            
                             respuesta = cliente_llm.chat.completions.create(
-                                model=modelo_usar, 
+                                model=modelo, 
                                 messages=[
                                     {"role": "system", "content": "Eres un servidor que SOLO devuelve código JSON válido."},
                                     {"role": "user", "content": prompt}
@@ -215,28 +233,29 @@ with tab2:
                             )
                             texto_respuesta = respuesta.choices[0].message.content
                             
-                            # Limpieza por si Ollama devuelve markdown de todas formas
+                            # Limpieza para modelos locales rebeldes
                             if texto_respuesta.startswith("```json"):
                                 texto_respuesta = texto_respuesta[7:-3]
-                            
+                                
                             respuesta_json = json.loads(texto_respuesta.strip())
-                            break # Exito
-                            
-                        except Exception as e:
-                            error_msg = str(e)
-                            if "503" in error_msg or "429" in error_msg:
-                                st.toast("Servidor ocupado. Reintentando en 5 segundos...", icon="⏳")
-                                time.sleep(5) 
-                            else:
-                                raise e # Falla y salta al except principal
 
-            except Exception as e:
-                st.error(f"Fallo en la evaluación: {e}")
-            
+                        st.toast(f"¡Éxito con {modelo}!", icon="✅")
+                        exito = True
+                        break # Rompe el bucle de intentos (pasará a mostrar resultados)
+                        
+                    except Exception as e:
+                        error_msg = str(e)
+                        if "503" in error_msg or "429" in error_msg:
+                            st.toast(f"Servidor ocupado. Reintentando en 5s...", icon="⏳")
+                            time.sleep(5) 
+                        else:
+                            # Si es un error crítico (Ollama apagado, clave falsa), salimos de los reintentos
+                            break
+                            
             # --- MOSTRAR RESULTADOS ---
-            if respuesta_json:
+            if exito and respuesta_json:
                 dic_resultado = respuesta_json
-                st.success(f"✅ Evaluación completada ({proveedor})")
+                st.success(f"✅ Evaluación completada con éxito")
                 st.markdown(f"### 🎯 Nota Global: **{dic_resultado.get('nota_global', 0)} / 10**")
                 st.info(f"**Resumen del Análisis:**\n\n{dic_resultado.get('resumen_analisis', 'Sin resumen.')}")
                 
@@ -253,4 +272,6 @@ with tab2:
                     for item in dic_resultado.get('puntos_a_corregir', []):
                         st.markdown(f"**❌ Qué está mal:** {item.get('que_esta_mal', '')}")
                         st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;**💡 Cómo corregir:** _{item.get('como_corregir', '')}_")
-                        st.write("")
+                        st.write("") 
+            else:
+                st.error(f"Todos los intentos fallaron. Último error: {error_msg}")
