@@ -128,7 +128,7 @@ with tab2:
             
             try:
                 respuesta = cliente_llm.chat.completions.create(
-                    model="llama3-70b-8192",
+                    model="openai/gpt-oss-120b",
                     messages=[
                         {"role": "system", "content": "Respondes estrictamente en JSON."},
                         {"role": "user", "content": prompt}
