@@ -3,6 +3,7 @@ import chromadb
 from pypdf import PdfReader
 from openai import OpenAI
 import json
+import time
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(page_title="Evaluador de Informes IA", layout="wide")
@@ -25,7 +26,24 @@ def extraer_texto_pdf(pdf_file):
             texto += page.extract_text() + "\n"
     return texto
 
-# --- INTERFAZ DE USUARIO ---
+# --- BARRA LATERAL: CONFIGURACIÓN DE API KEYS ---
+with st.sidebar:
+    st.header("⚙️ Configuración del Profesor")
+    st.info("Para usar la herramienta, introduce tu propia clave de acceso. Tus datos no se guardan.")
+    
+    proveedor = st.selectbox(
+        "Proveedor de IA",
+        ["Google Gemini (Recomendado)", "Groq", "OpenAI", "Anthropic"]
+    )
+    
+    api_key_usuario = st.text_input(f"API Key de {proveedor}", type="password")
+    
+    st.divider()
+    st.caption("🔑 **¿No tienes clave?**")
+    st.caption("- [Conseguir clave de Gemini (Gratis)](https://aistudio.google.com/app/apikey)")
+    st.caption("- [Conseguir clave de Groq (Gratis, límite 15 págs)](https://console.groq.com/keys)")
+
+# --- INTERFAZ PRINCIPAL ---
 st.title("🤖 Evaluador de Informes (Proyectos de Ingeniería)", 
          help="**¿Por qué usar esto y no ChatGPT directamente?**\n\nEsta herramienta utiliza RAG (Generación Aumentada por Recuperación) y Salidas Estructuradas JSON.\n\nAl contrario que subir un PDF a Gemini o Claude donde la IA opina libremente, este sistema obliga al modelo a leer PRIMERO tus apuntes y rúbricas (Base de Conocimiento) y a devolver el feedback siempre en el mismo formato estricto (Puntos fuertes y Correcciones detalladas), garantizando una consistencia que no se logra en un chat abierto.")
 
@@ -54,7 +72,6 @@ with tab1:
                         metadatas=[{"fuente": ref.name} for _ in chunks]
                     )
             st.success(f"✅ ¡{len(referencias)} documentos añadidos a la base de conocimiento!")
-            st.write(f"Total de fragmentos en base de datos: {collection.count()}")
         else:
             st.warning("Por favor, sube al menos un documento PDF.")
 
@@ -64,36 +81,54 @@ with tab2:
               help="**Privacidad del alumno:**\n\nA diferencia de la pestaña anterior, los informes que subas aquí NO SE GUARDAN. Se procesan temporalmente en la memoria RAM del servidor para extraer el texto, se evalúan, y desaparecen en cuanto cierras la aplicación.")
     informe_alumno = st.file_uploader("Sube el informe del alumno (PDF)", type="pdf", key="alumno")
     
-    # El botón ahora tiene el tooltip sobre los errores de Rate Limit
     if st.button("Analizar y Evaluar", 
-                 help="**Si te da error 'Rate limit exceeded' o '429 Too Many Requests':**\n\nEstás usando una API gratuita que tiene un límite de evaluaciones por minuto/día.\nNo te preocupes, el límite es temporal. Si evalúas muchos proyectos seguidos, espera unos minutos o inténtalo al día siguiente y el servicio se restablecerá automáticamente."):
+                 help="**Si te da error 'Rate limit exceeded':**\n\nEstás usando una API gratuita que tiene un límite de evaluaciones por minuto/día.\nNo te preocupes, el límite es temporal. Espera unos minutos o inténtalo al día siguiente y el servicio se restablecerá automáticamente."):
         
-        if not informe_alumno:
-            st.warning("Sube el informe del alumno para comenzar.")
+        if not api_key_usuario:
+            st.error("⚠️ Falta la API Key. Por favor, introdúcela en la barra lateral izquierda.")
             st.stop()
             
-        if "GROQ_API_KEY" not in st.secrets:
-            st.error("⚠️ Falta la API Key de Groq. Configúrala en los secretos de Streamlit.")
+        if not informe_alumno:
+            st.warning("Sube el informe del alumno para comenzar.")
             st.stop()
             
         with st.spinner("Extrayendo texto del informe..."):
             texto_alumno = extraer_texto_pdf(informe_alumno)
             
+            # Límite de seguridad si usan Groq (para que no colapse)
+            if proveedor == "Groq":
+                texto_alumno = texto_alumno[:15000]
+                st.toast("Aviso: Como usas Groq, se ha limitado la lectura a las primeras ~5 páginas para evitar colapsar la API gratuita.", icon="⚠️")
+            
         with st.spinner("Buscando referencias en la base de conocimiento..."):
             if collection.count() == 0:
-                st.warning("No hay base de conocimiento cargada. Se evaluará sin contexto previo.")
                 contexto_recuperado = "No hay contexto disponible."
             else:
-                resultados = collection.query(query_texts=[texto_alumno[:2000]], n_results=3)
+                resultados = collection.query(query_texts=[texto_alumno[:3000]], n_results=4)
                 if resultados["documents"]:
                     contexto_recuperado = "\n\n---\n\n".join(resultados["documents"][0])
                 else:
                     contexto_recuperado = "No se encontró contexto relevante."
                     
-        with st.spinner("La IA está evaluando el informe exhaustivamente. Esto tomará unos segundos..."):
+        with st.spinner("La IA está evaluando el informe exhaustivamente..."):
+            
+            # --- CONFIGURACIÓN DEL CLIENTE SEGÚN PROVEEDOR ---
+            if proveedor == "Google Gemini (Recomendado)":
+                base_url = "https://generativelanguage.googleapis.com/v1beta/openai/"
+                modelos_a_probar = ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash"]
+            elif proveedor == "Groq":
+                base_url = "https://api.groq.com/openai/v1"
+                modelos_a_probar = ["openai/gpt-oss-120b"]
+            elif proveedor == "OpenAI":
+                base_url = "https://api.openai.com/v1"
+                modelos_a_probar = ["gpt-4o-mini", "gpt-4o"]
+            else: # Anthropic no soporta formato OpenAI nativo directamente en este endpoint sin proxy
+                st.error("Para Anthropic se requiere una configuración distinta no soportada en esta versión básica.")
+                st.stop()
+
             cliente_llm = OpenAI(
-                base_url="https://api.groq.com/openai/v1",
-                api_key=st.secrets["GROQ_API_KEY"]
+                base_url=base_url,
+                api_key=api_key_usuario
             )
             
             prompt = f"""
@@ -104,45 +139,58 @@ with tab2:
             {contexto_recuperado}
             
             INFORME DEL ALUMNO A EVALUAR:
-            {texto_alumno[:50000]} 
+            {texto_alumno} 
             
             INSTRUCCIONES CRÍTICAS:
-            1. Analiza exhaustivamente el documento.
+            1. Analiza exhaustivamente TODO el documento.
             2. Identifica TODOS los errores, fallos de cálculo, faltas de formato o ausencias de contenido.
             3. Por cada error, DEBES explicar qué está mal y cómo sugerirías corregirlo detalladamente.
-            4. Devuelve el resultado ÚNICAMENTE en formato JSON CRUDO. NO incluyas bloques de código Markdown (```json). Empieza directamente con {{ y termina con }}.
+            4. Devuelve el resultado ÚNICAMENTE en formato JSON CRUDO. NO incluyas bloques de código Markdown.
             
             ESTRUCTURA JSON EXACTA:
             {{
               "nota_global": (número decimal sobre 10),
-              "resumen_analisis": "Un párrafo de 4 o 5 líneas resumiendo el nivel general del trabajo, el esfuerzo demostrado y las deficiencias clave.",
+              "resumen_analisis": "Un párrafo resumiendo el nivel general.",
               "puntos_fuertes": [
-                "Punto fuerte 1",
-                "Punto fuerte 2"
+                "Punto fuerte 1"
               ],
               "puntos_a_corregir": [
                 {{
-                  "que_esta_mal": "Descripción detallada del error o aspecto deficiente",
-                  "como_corregir": "Sugerencia concreta, técnica y constructiva sobre cómo solucionarlo"
+                  "que_esta_mal": "Descripción detallada del error",
+                  "como_corregir": "Sugerencia concreta sobre cómo solucionarlo"
                 }}
               ]
             }}
             """
             
-            try:
-                respuesta = cliente_llm.chat.completions.create(
-                    model="openai/gpt-oss-120b",
-                    messages=[
-                        {"role": "system", "content": "Eres un servidor que SOLO devuelve código JSON válido. Nada de texto introductorio."},
-                        {"role": "user", "content": prompt}
-                    ],
-                    temperature=0.1,
-                    max_tokens=4000,
-                    response_format={"type": "json_object"}
-                )
-                
-                dic_resultado = json.loads(respuesta.choices[0].message.content)
-                
+            respuesta_json = None
+            error_msg = ""
+            
+            # --- SISTEMA DE RESPALDO (FALLBACK) ---
+            for modelo in modelos_a_probar:
+                try:
+                    st.toast(f"Intentando evaluar con el modelo: {modelo}...", icon="🔄")
+                    respuesta = cliente_llm.chat.completions.create(
+                        model=modelo, 
+                        messages=[
+                            {"role": "system", "content": "Eres un servidor que SOLO devuelve código JSON válido."},
+                            {"role": "user", "content": prompt}
+                        ],
+                        temperature=0.1,
+                        response_format={"type": "json_object"}
+                    )
+                    respuesta_json = json.loads(respuesta.choices[0].message.content)
+                    st.toast(f"¡Éxito con {modelo}!", icon="✅")
+                    break # Si funciona, salimos del bucle
+                    
+                except Exception as e:
+                    error_msg = str(e)
+                    st.toast(f"Fallo en {modelo}, intentando con el modelo de respaldo...", icon="⚠️")
+                    time.sleep(1) # Pequeña pausa antes de reintentar
+            
+            # --- MOSTRAR RESULTADOS ---
+            if respuesta_json:
+                dic_resultado = respuesta_json
                 st.success("✅ Evaluación completada")
                 st.markdown(f"### 🎯 Nota Global: **{dic_resultado.get('nota_global', 0)} / 10**")
                 st.info(f"**Resumen del Análisis:**\n\n{dic_resultado.get('resumen_analisis', 'Sin resumen.')}")
@@ -152,23 +200,14 @@ with tab2:
                 
                 with col1:
                     st.success("🌟 Puntos Fuertes")
-                    puntos_fuertes = dic_resultado.get('puntos_fuertes', [])
-                    if puntos_fuertes:
-                        for punto in puntos_fuertes:
-                            st.write(f"- {punto}")
-                    else:
-                        st.write("No se han identificado puntos fuertes destacables.")
+                    for punto in dic_resultado.get('puntos_fuertes', []):
+                        st.write(f"- {punto}")
                         
                 with col2:
                     st.error("🛠️ Áreas de Mejora y Correcciones")
-                    puntos_a_corregir = dic_resultado.get('puntos_a_corregir', [])
-                    if puntos_a_corregir:
-                        for item in puntos_a_corregir:
-                            st.markdown(f"**❌ Qué está mal:** {item.get('que_esta_mal', '')}")
-                            st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;**💡 Cómo corregir:** _{item.get('como_corregir', '')}_")
-                            st.write("") 
-                    else:
-                        st.write("No se han encontrado errores significativos. ¡Excelente trabajo!")
-                        
-            except Exception as e:
-                st.error(f"Ocurrió un error al generar la evaluación: {e}")
+                    for item in dic_resultado.get('puntos_a_corregir', []):
+                        st.markdown(f"**❌ Qué está mal:** {item.get('que_esta_mal', '')}")
+                        st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;**💡 Cómo corregir:** _{item.get('como_corregir', '')}_")
+                        st.write("") 
+            else:
+                st.error(f"Todos los modelos fallaron o la API Key es incorrecta. Último error: {error_msg}")
