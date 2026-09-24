@@ -62,8 +62,8 @@ with st.sidebar:
         
     elif proveedor == "Google Gemini":
         api_key_usuario = st.text_input("API Key de Gemini:", type="password")
-        # Actualizado con la lista de modelos óptimos de 2026
-        modelo_nube = st.selectbox("Modelo Principal:", ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash"])
+        # Añadido el gemini-3.5-flash a la lista
+        modelo_nube = st.selectbox("Modelo Principal:", ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash"])
         st.caption("Si el principal se satura (503), el sistema usará los otros como respaldo automáticamente.")
         st.caption("🔑 [Conseguir clave de Gemini Gratis](https://aistudio.google.com/app/apikey)")
         
@@ -73,13 +73,17 @@ with st.sidebar:
         st.caption("🔑 [Clave de Groq Gratis (Límite 5 págs)](https://console.groq.com/keys)")
 
 # --- INTERFAZ PRINCIPAL ---
-st.title("🤖 Evaluador de Informes (Proyectos de Ingeniería)")
+# TOOLTIP RESTAURADO
+st.title("🤖 Evaluador de Informes (Proyectos de Ingeniería)", 
+         help="**¿Por qué usar esto y no ChatGPT directamente?**\n\nEsta herramienta utiliza RAG (Generación Aumentada por Recuperación) y Salidas Estructuradas JSON.\n\nAl contrario que subir un PDF a Gemini o Claude donde la IA opina libremente, este sistema obliga al modelo a leer PRIMERO tus apuntes y rúbricas (Base de Conocimiento) y a devolver el feedback siempre en el mismo formato estricto (Puntos fuertes y Correcciones detalladas), garantizando una consistencia que no se logra en un chat abierto.")
 
 tab1, tab2 = st.tabs(["📚 1. Subir Base de Conocimiento", "📝 2. Evaluar Informe del Alumno"])
 
 # --- PESTAÑA 1: BASE DE CONOCIMIENTO ---
 with tab1:
-    st.header("Alimentar el sistema")
+    # TOOLTIP RESTAURADO
+    st.header("Alimentar el sistema", 
+              help="**¿Dónde se guardan estos PDF?**\n\nLos archivos que subas aquí SÍ se procesan y se guardan en una base de datos vectorial interna en el servidor (ChromaDB) mientras la aplicación esté activa. Permanecerán ahí como memoria colectiva para evaluar los proyectos nuevos, hasta que el servidor se reinicie tras días de inactividad.")
     st.info("Sube apuntes o rúbricas. Se usarán como memoria (RAG) para corregir.")
     
     referencias = st.file_uploader("Sube PDFs de referencia", type="pdf", accept_multiple_files=True)
@@ -104,10 +108,14 @@ with tab1:
 
 # --- PESTAÑA 2: EVALUACIÓN ---
 with tab2:
-    st.header("Evaluar un nuevo trabajo")
+    # TOOLTIP RESTAURADO
+    st.header("Evaluar un nuevo trabajo", 
+              help="**Privacidad del alumno:**\n\nA diferencia de la pestaña anterior, los informes que subas aquí NO SE GUARDAN. Se procesan temporalmente en la memoria RAM del servidor para extraer el texto, se evalúan, y desaparecen en cuanto cierras la aplicación.")
     informe_alumno = st.file_uploader("Sube el informe del alumno (PDF)", type="pdf", key="alumno")
     
-    if st.button("Analizar y Evaluar"):
+    # TOOLTIP RESTAURADO
+    if st.button("Analizar y Evaluar", 
+                 help="**Si te da error 'Rate limit exceeded' o '503':**\n\nEstás usando una API gratuita que tiene un límite de evaluaciones por minuto/día o el servidor está saturado.\nNo te preocupes, el sistema esperará 5 segundos y probará con otro modelo automáticamente."):
         
         if proveedor != "Ollama (Local)" and not api_key_usuario:
             st.error(f"⚠️ Falta la API Key. Por favor, introdúcela en la barra lateral.")
@@ -170,15 +178,16 @@ with tab2:
             error_msg = ""
             exito = False
             
-            # --- PREPARAR LA LISTA DE MODELOS A PROBAR ---
-            # Si es Gemini, creamos la lista de respaldo. Si es otro, solo prueba el elegido.
+            # --- PREPARAR LA LISTA DE MODELOS A PROBAR (ACTUALIZADO CON 3.5) ---
             if proveedor == "Google Gemini":
                 if modelo_nube == "gemini-3.8-flash":
-                    modelos_a_probar = ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash"]
+                    modelos_a_probar = ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash"]
                 elif modelo_nube == "gemini-3.7-flash":
-                    modelos_a_probar = ["gemini-3.7-flash", "gemini-3.6-flash"]
+                    modelos_a_probar = ["gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash"]
+                elif modelo_nube == "gemini-3.6-flash":
+                    modelos_a_probar = ["gemini-3.6-flash", "gemini-3.5-flash"]
                 else:
-                    modelos_a_probar = ["gemini-3.6-flash"]
+                    modelos_a_probar = ["gemini-3.5-flash"]
             elif proveedor == "Ollama (Local)":
                 modelos_a_probar = [modelo_local]
             else:
@@ -187,7 +196,7 @@ with tab2:
             # --- BUCLE MAESTRO DE EVALUACIÓN (CON RESPALDO Y REINTENTOS) ---
             for modelo in modelos_a_probar:
                 if exito: 
-                    break # Si ya lo hemos logrado con un modelo anterior, salimos del bucle general
+                    break 
                 
                 intentos_por_modelo = 2
                 for intento in range(intentos_por_modelo):
@@ -241,7 +250,7 @@ with tab2:
 
                         st.toast(f"¡Éxito con {modelo}!", icon="✅")
                         exito = True
-                        break # Rompe el bucle de intentos (pasará a mostrar resultados)
+                        break 
                         
                     except Exception as e:
                         error_msg = str(e)
@@ -249,13 +258,12 @@ with tab2:
                             st.toast(f"Servidor ocupado. Reintentando en 5s...", icon="⏳")
                             time.sleep(5) 
                         else:
-                            # Si es un error crítico (Ollama apagado, clave falsa), salimos de los reintentos
                             break
                             
             # --- MOSTRAR RESULTADOS ---
             if exito and respuesta_json:
                 dic_resultado = respuesta_json
-                st.success(f"✅ Evaluación completada con éxito")
+                st.success(f"✅ Evaluación completada con éxito ({proveedor})")
                 st.markdown(f"### 🎯 Nota Global: **{dic_resultado.get('nota_global', 0)} / 10**")
                 st.info(f"**Resumen del Análisis:**\n\n{dic_resultado.get('resumen_analisis', 'Sin resumen.')}")
                 
