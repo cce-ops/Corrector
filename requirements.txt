@@ -4,3 +4,4 @@ pypdf
 openai
 anthropic
 pandas
+google-generativeai
