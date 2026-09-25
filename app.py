@@ -304,23 +304,24 @@ with tab2:
 
             # 1. GOOGLE GEMINI (SDK OFICIAL)
             if proveedor == "Google Gemini":
-              genai.configure(api_key=api_key_usuario)
-              modelo_gemini = genai.GenerativeModel(
-                  modelo,
-                  generation_config={"response_mime_type": "application/json"},
-              )
-              response = modelo_gemini.generate_content(prompt)
-              texto_resp = response.text
+  genai.configure(api_key=api_key_usuario)
+  modelo_gemini = genai.GenerativeModel(
+      modelo,
+      generation_config={
+          "temperature": 0.2,  # <-- Añadido aquí
+          "response_mime_type": "application/json",
+      },
+  )
+  response = modelo_gemini.generate_content(prompt)
+  texto_resp = response.text
 
-              if texto_resp.startswith("```json"):
-                texto_resp = texto_resp[7:-3]
-              elif texto_resp.startswith("```"):
-                lines = texto_resp.strip().splitlines()
-                texto_resp = "\n".join(
-                    [l for l in lines if not l.startswith("```")]
-                )
+  if texto_resp.startswith("```json"):
+    texto_resp = texto_resp[7:-3]
+  elif texto_resp.startswith("```"):
+    lines = texto_resp.strip().splitlines()
+    texto_resp = "\n".join([l for l in lines if not l.startswith("```")])
 
-              respuesta_json = json.loads(texto_resp.strip())
+  respuesta_json = json.loads(texto_resp.strip())
 
             # 2. ANTHROPIC (CLAUDE)
             elif proveedor == "Anthropic (Claude)":
