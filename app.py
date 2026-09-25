@@ -7,6 +7,14 @@ from openai import OpenAI
 from pypdf import PdfReader
 import streamlit as st
 
+# Intentar importar cliente nativo de Groq
+try:
+  from groq import Groq
+
+  GROQ_INSTALADO = True
+except ImportError:
+  GROQ_INSTALADO = False
+
 # --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(page_title="Evaluador de Informes IA", layout="wide")
 
@@ -94,10 +102,6 @@ with st.sidebar:
     opcion_gemini = st.selectbox("Modelo:", list(GEMINI_MODELS.keys()))
     modelo_nube = GEMINI_MODELS[opcion_gemini]
     st.caption(
-        "Si el principal se satura (503), el sistema usará los siguientes como"
-        " respaldo automáticamente."
-    )
-    st.caption(
         "🔑 [Conseguir clave de Gemini"
         " Gratis](https://aistudio.google.com/app/apikey)"
     )
@@ -123,9 +127,7 @@ with st.sidebar:
     api_key_usuario = st.text_input("API Key de Groq:", type="password")
     opcion_groq = st.selectbox("Modelo:", list(GROQ_MODELS.keys()))
     modelo_nube = GROQ_MODELS[opcion_groq]
-    st.caption(
-        "🔑 [Clave de Groq Gratis](https://console.groq.com/keys)"
-    )
+    st.caption("🔑 [Clave de Groq Gratis](https://console.groq.com/keys)")
 
   elif proveedor == "OpenAI (ChatGPT)":
     api_key_usuario = st.text_input("API Key de OpenAI:", type="password")
@@ -157,12 +159,7 @@ st.title(
     help=(
         "**¿Por qué usar esto y no ChatGPT directamente?**\n\nEsta herramienta"
         " utiliza RAG (Generación Aumentada por Recuperación) y Salidas"
-        " Estructuradas JSON.\n\nAl contrario que subir un PDF a Gemini o Claude"
-        " donde la IA opina libremente, este sistema obliga al modelo a leer"
-        " PRIMERO tus apuntes y rúbricas (Base de Conocimiento) y a devolver el"
-        " feedback siempre en el mismo formato estricto (Puntos fuertes y"
-        " Correcciones detalladas), garantizando una consistencia que no se"
-        " logra en un chat abierto."
+        " Estructuradas JSON."
     ),
 )
 
@@ -172,16 +169,7 @@ tab1, tab2 = st.tabs(
 
 # --- PESTAÑA 1: BASE DE CONOCIMIENTO ---
 with tab1:
-  st.header(
-      "Alimentar el sistema",
-      help=(
-          "**¿Dónde se guardan estos PDF?**\n\nLos archivos que subas aquí SÍ"
-          " se procesan y se guardan en una base de datos vectorial interna en"
-          " el servidor (ChromaDB) mientras la aplicación esté activa."
-          " Permanecerán ahí como memoria colectiva para evaluar los proyectos"
-          " nuevos, hasta que el servidor se reinicie tras días de inactividad."
-      ),
-  )
+  st.header("Alimentar el sistema")
   st.info(
       "Sube apuntes o rúbricas. Se usarán como memoria (RAG) para corregir."
   )
@@ -216,28 +204,12 @@ with tab1:
 
 # --- PESTAÑA 2: EVALUACIÓN ---
 with tab2:
-  st.header(
-      "Evaluar un nuevo trabajo",
-      help=(
-          "**Privacidad del alumno:**\n\nA diferencia de la pestaña anterior,"
-          " los informes que subas aquí NO SE GUARDAN. Se procesan"
-          " temporalmente en la memoria RAM del servidor para extraer el texto,"
-          " se evalúan, y desaparecen en cuanto cierras la aplicación."
-      ),
-  )
+  st.header("Evaluar un nuevo trabajo")
   informe_alumno = st.file_uploader(
       "Sube el informe del alumno (PDF)", type="pdf", key="alumno"
   )
 
-  if st.button(
-      "Analizar y Evaluar",
-      help=(
-          "**Si te da error 'Rate limit exceeded' o '503':**\n\nEstás usando una"
-          " API gratuita que tiene un límite de evaluaciones por minuto/día o el"
-          " servidor está saturado.\nNo te preocupes, el sistema esperará 5"
-          " segundos y probará con otro modelo automáticamente."
-      ),
-  ):
+  if st.button("Analizar y Evaluar"):
 
     if proveedor != "Ollama (Local)" and not api_key_usuario:
       st.error("⚠️ Falta la API Key. Por favor, introdúcela en la barra lateral.")
@@ -249,7 +221,7 @@ with tab2:
 
     with st.spinner("Extrayendo texto del informe..."):
       texto_alumno = extraer_texto_pdf(informe_alumno)
-      if proveedor in ["Groq - Gratis"]:
+      if proveedor == "Groq - Gratis":
         texto_alumno = texto_alumno[:15000]
       elif proveedor == "Anthropic (Claude)":
         texto_alumno = texto_alumno[:50000]
@@ -288,7 +260,7 @@ with tab2:
             
             ESTRUCTURA JSON EXACTA:
             {{
-              "nota_global": (número decimal sobre 10),
+              "nota_global": 7.5,
               "resumen_analisis": "Un párrafo resumiendo el nivel general.",
               "puntos_fuertes": ["Punto fuerte 1"],
               "puntos_a_corregir": [
@@ -304,7 +276,7 @@ with tab2:
       error_msg = ""
       exito = False
 
-      # --- PREPARAR LISTA DE MODELOS (Respaldo en caso de Gemini) ---
+      # --- LISTA DE MODELOS A PROBAR ---
       if proveedor == "Google Gemini":
         lista_gemini = list(GEMINI_MODELS.values())
         idx = (
@@ -316,7 +288,7 @@ with tab2:
       else:
         modelos_a_probar = [modelo_nube]
 
-      # --- BUCLE MAESTRO DE EVALUACIÓN ---
+      # --- BUCLE DE EVALUACIÓN ---
       for modelo in modelos_a_probar:
         if exito:
           break
@@ -330,7 +302,7 @@ with tab2:
                 icon="🔄",
             )
 
-            # 1. SDK GOOGLE GENERATIVEAI
+            # 1. GOOGLE GEMINI (SDK OFICIAL)
             if proveedor == "Google Gemini":
               genai.configure(api_key=api_key_usuario)
               modelo_gemini = genai.GenerativeModel(
@@ -350,7 +322,7 @@ with tab2:
 
               respuesta_json = json.loads(texto_resp.strip())
 
-            # 2. SDK ANTHROPIC (CLAUDE)
+            # 2. ANTHROPIC (CLAUDE)
             elif proveedor == "Anthropic (Claude)":
               cliente_claude = Anthropic(api_key=api_key_usuario)
               respuesta = cliente_claude.messages.create(
@@ -368,24 +340,56 @@ with tab2:
               )
               respuesta_json = json.loads(respuesta.content[0].text)
 
-            # 3. CLIENTE OPENAI (NVIDIA NIM, OpenRouter, Groq, OpenAI, Ollama)
+            # 3. GROQ NATIVO (SI ESTÁ INSTALADO)
+            elif proveedor == "Groq - Gratis" and GROQ_INSTALADO:
+              cliente_groq = Groq(api_key=api_key_usuario)
+              respuesta = cliente_groq.chat.completions.create(
+                  model=modelo,
+                  messages=[
+                      {
+                          "role": "system",
+                          "content": (
+                              "Eres un servidor que SOLO devuelve código JSON"
+                              " válido."
+                          ),
+                      },
+                      {"role": "user", "content": prompt},
+                  ],
+                  temperature=0.2,
+                  response_format={"type": "json_object"},
+              )
+              texto_respuesta = respuesta.choices[0].message.content
+              if texto_respuesta.startswith("```json"):
+                texto_respuesta = texto_respuesta[7:-3]
+              respuesta_json = json.loads(texto_respuesta.strip())
+
+            # 4. RESTO DE PROVEEDORES VÍA CLIENTE OPENAI (OPENROUTER, NVIDIA, OLLAMA, OPENAI)
             else:
+              headers = {}
               extra_args = {}
-              if proveedor == "NVIDIA NIM":
-                base_url = "[https://integrate.api.nvidia.com/v1](https://integrate.api.nvidia.com/v1)"
-              elif proveedor == "OpenRouter - Gratis":
-                base_url = "[https://openrouter.ai/api/v1](https://openrouter.ai/api/v1)"
+
+              if proveedor == "OpenRouter - Gratis":
+                base_url = "https://openrouter.ai/api/v1"
+                headers = {
+                    "HTTP-Referer": "https://corrector-ia.streamlit.app",
+                    "X-Title": "Evaluador de Informes IA",
+                }
               elif proveedor == "Groq - Gratis":
-                base_url = "[https://api.groq.com/openai/v1](https://api.groq.com/openai/v1)"
+                base_url = "https://api.groq.com/openai/v1"
+              elif proveedor == "NVIDIA NIM":
+                base_url = "https://integrate.api.nvidia.com/v1"
               elif proveedor == "OpenAI (ChatGPT)":
-                base_url = "[https://api.openai.com/v1](https://api.openai.com/v1)"
+                base_url = "https://api.openai.com/v1"
               elif proveedor == "Ollama (Local)":
                 base_url = "http://localhost:11434/v1"
                 api_key_usuario = "ollama"
                 extra_args = {"extra_body": {"options": {"num_ctx": 32000}}}
 
               cliente_llm = OpenAI(
-                  base_url=base_url, api_key=api_key_usuario
+                  base_url=base_url,
+                  api_key=api_key_usuario,
+                  default_headers=headers if headers else None,
+                  timeout=60.0,  # Previene timeouts y cortes de conexión repentinos
               )
 
               respuesta = cliente_llm.chat.completions.create(
@@ -428,6 +432,7 @@ with tab2:
               st.toast("Servidor ocupado. Reintentando en 5s...", icon="⏳")
               time.sleep(5)
             else:
+              st.toast(f"Fallo en {modelo}: {error_msg[:80]}...", icon="⚠️")
               break
 
       # --- MOSTRAR RESULTADOS ---
